@@ -1,7 +1,6 @@
 import os
 from PIL import Image
 import torch
-torch.cuda.empty_cache()
 import torchvision
 torchvision.disable_beta_transforms_warning()
 import torchvision.transforms.functional as F
@@ -10,9 +9,7 @@ from transformers import (AutoModel, AutoProcessor, AutoTokenizer, AutoConfig,
                             CLIPImageProcessor, CLIPVisionModelWithProjection)
 from qwen_vl_utils import process_vision_info
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-torch.manual_seed(42) 
-torch.cuda.manual_seed_all(42)
+torch.manual_seed(42)
 
 class Qwen2_5VLBatchInferencer:
     def __init__(self, model_path: str = "Qwen/Qwen2.5-VL-7B-Instruct", 
@@ -28,8 +25,7 @@ class Qwen2_5VLBatchInferencer:
             model_path,
             torch_dtype=dtype,
             attn_implementation=attn_impl,
-            device_map="auto",
-        )
+        ).to(device)
         self.processor = AutoProcessor.from_pretrained(model_path)
         self.device = torch.device(device)
         self.TEXT_PROMPT = (
@@ -170,6 +166,7 @@ class LLM2CLIP:
         self.llm_model = AutoModel.from_pretrained(
             self.llm_model_name, torch_dtype=torch.bfloat16, config=self.config, trust_remote_code=True
         )
+        self.llm_model.config.use_cache = False
         self.tokenizer = AutoTokenizer.from_pretrained(self.llm_model_name)
         
         self.llm_model.config._name_or_path = 'meta-llama/Meta-Llama-3-8B-Instruct'  # Workaround for LLM2VEC
@@ -181,28 +178,24 @@ class LLM2CLIP:
         self.device = device
 
     def text_img_similarity_score(self, image_path_list, text_prompt):
-        try:
-            captions = [text_prompt]
-            images = [Image.open(image_path) for image_path in image_path_list]
-            
-            # Process images and encode text
-            input_pixels = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
-            text_features = self.l2v.encode(captions, convert_to_tensor=True).to(self.device)
+        captions = [text_prompt]
+        images = [Image.open(image_path) for image_path in image_path_list]
 
-            # Get image and text features
-            with torch.no_grad(), torch.amp.autocast(self.device):
-                image_features = self.model.get_image_features(input_pixels)
-                text_features = self.model.get_text_features(text_features)
+        # Process images and encode text
+        input_pixels = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
+        text_features = self.l2v.encode(captions, convert_to_tensor=True).to(self.device)
 
-                # Normalize features
-                image_features /= image_features.norm(dim=-1, keepdim=True)
-                text_features /= text_features.norm(dim=-1, keepdim=True)
+        # Get image and text features
+        with torch.no_grad(), torch.amp.autocast(self.device):
+            image_features = self.model.get_image_features(input_pixels)
+            text_features = self.model.get_text_features(text_features)
 
-                # Compute similarity score (dot product)
-                text_probs = image_features @ text_features.T
-                text_probs = text_probs.cpu().tolist()
+            # Normalize features
+            image_features /= image_features.norm(dim=-1, keepdim=True)
+            text_features /= text_features.norm(dim=-1, keepdim=True)
 
-            return [text_prob[0] for text_prob in text_probs]
-        except Exception as e:
-            print(f"Error: {e}")
-            return None
+            # Compute similarity score (dot product)
+            text_probs = image_features @ text_features.T
+            text_probs = text_probs.cpu().tolist()
+
+        return [text_prob[0] for text_prob in text_probs]
