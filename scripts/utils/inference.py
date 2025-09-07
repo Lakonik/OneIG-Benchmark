@@ -14,17 +14,13 @@ torch.manual_seed(42)
 class Qwen2_5VLBatchInferencer:
     def __init__(self, model_path: str = "Qwen/Qwen2.5-VL-7B-Instruct", 
                     device: str = "cuda", 
-                    dtype=torch.bfloat16, 
-                    use_flash_attention: bool = True):
-        
-        attn_impl = "flash_attention_2" if use_flash_attention else "eager"
+                    dtype=torch.bfloat16):
         
         from transformers import Qwen2_5_VLForConditionalGeneration
         
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_path,
             torch_dtype=dtype,
-            attn_implementation=attn_impl,
         ).to(device)
         self.processor = AutoProcessor.from_pretrained(model_path)
         self.device = torch.device(device)
