@@ -13,6 +13,7 @@ import tempfile
 import torch
 import torch.distributed as dist
 import socket
+import json
 
 import datetime
 current_time = datetime.datetime.now()
@@ -204,6 +205,19 @@ def main():
             score_csv.loc[model_name, "text score"] = 1 - min(MAX_EDIT_DISTANCE, ED) * (1 - CR) * (1 - WAC) / MAX_EDIT_DISTANCE
 
         save2csv(score_csv, text_score_csv)
+
+        # Print parseable final results on rank 0
+        result_dict = {}
+        for model_name in args.model_names:
+            row = score_csv.loc[model_name].to_dict()
+            row = {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
+            result_dict[model_name] = row
+        print("FINAL_RESULT " + json.dumps({
+            "script": "text",
+            "mode": args.mode,
+            "timestamp": formatted_time,
+            "results": result_dict
+        }))
 
     # save2csv(score_of_prompt_csv, text_prompt_score_csv)
 

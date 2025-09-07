@@ -199,6 +199,19 @@ def main():
         # score_of_prompt_csv = score_of_prompt_csv.sort_index()
         # save2csv(score_of_prompt_csv, alignment_prompt_score_csv)
 
+        # Print parseable final results on rank 0
+        result_dict = {}
+        for model_name in args.model_names:
+            row = score_csv.loc[model_name].to_dict()
+            row = {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
+            result_dict[model_name] = row
+        print("FINAL_RESULT " + json.dumps({
+            "script": "alignment",
+            "mode": args.mode,
+            "timestamp": formatted_time,
+            "results": result_dict
+        }))
+
     # Ensure all ranks reach this point before cleanup
     if ddp_active:
         dist.barrier()

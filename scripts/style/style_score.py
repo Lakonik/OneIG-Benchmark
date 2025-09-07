@@ -13,6 +13,7 @@ from scripts.utils.inference import CSDStyleEmbedding, SEStyleEmbedding
 import tempfile
 import torch.distributed as dist
 import socket
+import json
 
 import datetime
 current_time = datetime.datetime.now()
@@ -192,6 +193,20 @@ def main():
         dist.barrier()
     if os.path.exists(cache_dir):
         shutil.rmtree(cache_dir, onerror=on_rm_error)
+
+    if rank == 0:
+        # Print parseable final results on rank 0
+        result_dict = {}
+        for model_name in args.model_names:
+            row = score_csv.loc[model_name].to_dict()
+            row = {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
+            result_dict[model_name] = row
+        print("FINAL_RESULT " + json.dumps({
+            "script": "style",
+            "mode": args.mode,
+            "timestamp": formatted_time,
+            "results": result_dict
+        }))
 
 if __name__ == "__main__":
     main()

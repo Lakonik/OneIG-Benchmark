@@ -15,6 +15,7 @@ import torch.distributed as dist
 
 import time
 import socket
+import json
 
 import datetime
 current_time = datetime.datetime.now()
@@ -169,6 +170,19 @@ def main():
         # Optionally save prompt-level scores
         # score_of_prompt_csv = score_of_prompt_csv.sort_index()
         # save2csv(score_of_prompt_csv, diversity_prompt_score_csv)
+
+        # Print parseable final results on rank 0
+        result_dict = {}
+        for model_name in args.model_names:
+            row = score_csv.loc[model_name].to_dict()
+            row = {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
+            result_dict[model_name] = row
+        print("FINAL_RESULT " + json.dumps({
+            "script": "diversity",
+            "mode": args.mode,
+            "timestamp": formatted_time,
+            "results": result_dict
+        }))
 
     if ddp_active:
         dist.barrier()
