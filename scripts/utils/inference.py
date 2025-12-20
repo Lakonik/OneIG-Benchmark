@@ -159,9 +159,12 @@ class LLM2CLIP:
         self.config = AutoConfig.from_pretrained(
             self.llm_model_name, trust_remote_code=True
         )
-        self.llm_model = AutoModel.from_pretrained(
-            self.llm_model_name, torch_dtype=torch.bfloat16, config=self.config, trust_remote_code=True
-        )
+        # self.llm_model = AutoModel.from_pretrained(
+        #     self.llm_model_name, torch_dtype=torch.bfloat16, config=self.config, trust_remote_code=True
+        # )
+        from scripts.utils.llama_encoder_model import LlamaEncoderModel
+        self.llm_model = LlamaEncoderModel.from_pretrained(
+            self.llm_model_name, torch_dtype=torch.bfloat16, config=self.config)
         self.llm_model.config.use_cache = False
         self.tokenizer = AutoTokenizer.from_pretrained(self.llm_model_name)
         
