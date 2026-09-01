@@ -25,9 +25,15 @@ _HOLDER_ATTRS = {
         "LlamaRMSNorm", "LlamaMLP", "LlamaAttention", "LlamaRotaryEmbedding",
     ),
 }
+# the vendored module exec can trigger transformers-internal re-imports that REPLACE
+# top-level sys.modules entries (observed: sys.modules["transformers"] becomes a fresh
+# _LazyModule), so the parent entries are snapshotted and restored verbatim as well
 _TARGET_MODULES = (
     "transformers.models.llama.modeling_llama",
     "transformers.models.llama.configuration_llama",
+    "transformers.models.llama",
+    "transformers.models",
+    "transformers",
 )
 
 _patch_state = None  # None when inactive; else dict(modules=..., attrs=...)
