@@ -5,7 +5,7 @@ import megfile
 import shutil
 import pandas as pd
 from tqdm import tqdm
-from scripts.utils.utils import parse_args, split_2x2_grid, save2csv, on_rm_error
+from scripts.utils.utils import parse_args, split_2x2_grid, save2csv, on_rm_error, setup_distributed
 
 import torch
 torch.cuda.empty_cache()
@@ -24,67 +24,17 @@ style_list = ['abstract_expressionism', 'art_nouveau', 'baroque', 'chinese_ink_p
 def main():
     args = parse_args()
     
-    # Initialize distributed environment if available
-    def _dist_init_if_needed():
-        if dist.is_available() and not dist.is_initialized():
-            backend = "nccl" if torch.cuda.is_available() else "gloo"
-            try:
-                dist.init_process_group(backend=backend, init_method="env://")
-            except Exception:
-                pass
-
-    _dist_init_if_needed()
-
-    ddp_active = dist.is_available() and dist.is_initialized()
-    world_size = dist.get_world_size() if ddp_active else 1
-    rank = dist.get_rank() if ddp_active else 0
-    local_rank = dist.get_node_local_rank() if ddp_active else 0
-
-    if torch.cuda.is_available():
-        try:
-            device_index = torch.cuda.current_device()
-        except Exception:
-            device_index = local_rank
-        device = f"cuda:{device_index}"
-    else:
-        device = "cpu"
+    ddp_active, world_size, rank, local_rank, device = setup_distributed()
 
     cache_dir = os.path.join(tempfile.gettempdir(), f"oneigbench_tmp_{formatted_time}_rank{rank}")
     os.makedirs(cache_dir, exist_ok=True)
 
-    # Per-rank cache roots to avoid shared-FS conflicts
-    base_cache = os.path.join(tempfile.gettempdir(), f"oneig_cache_rank{rank}")
-    os.makedirs(base_cache, exist_ok=True)
-    os.environ.setdefault("HF_HOME", os.path.join(base_cache, "hf_home"))
-    os.environ.setdefault("HF_HUB_CACHE", os.path.join(base_cache, "hf_hub_cache"))
-    os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(base_cache, "transformers_cache"))
-    os.environ.setdefault("XDG_CACHE_HOME", os.path.join(base_cache, "xdg_cache"))
 
     style_csv_path = "scripts/style/style.csv"
     df = pd.read_csv(style_csv_path, dtype=str)
     
-    # Avoid concurrent downloads/loads (HF) by warming up on rank 0
-    # Decide warm-up leader based on path sharing
-    def _is_within_repo(path):
-        try:
-            repo_root = os.path.abspath(os.getcwd())
-            ap = os.path.abspath(path)
-            return ap.startswith(repo_root + os.sep)
-        except Exception:
-            return False
-    shared_download = _is_within_repo(base_cache)
-    if ddp_active:
-        is_leader = (rank == 0) if shared_download else (local_rank == 0)
-        if is_leader:
-            CSD_Encoder = CSDStyleEmbedding(model_path="scripts/style/models/checkpoint.pth", device=device)
-            SE_Encoder = SEStyleEmbedding(pretrained_path="xingpng/OneIG-StyleEncoder", device=device)
-        dist.barrier()
-        if not is_leader:
-            CSD_Encoder = CSDStyleEmbedding(model_path="scripts/style/models/checkpoint.pth", device=device)
-            SE_Encoder = SEStyleEmbedding(pretrained_path="xingpng/OneIG-StyleEncoder", device=device)
-    else:
-        CSD_Encoder = CSDStyleEmbedding(model_path="scripts/style/models/checkpoint.pth", device=device)
-        SE_Encoder = SEStyleEmbedding(pretrained_path="xingpng/OneIG-StyleEncoder", device=device)
+    CSD_Encoder = CSDStyleEmbedding(model_path="scripts/style/models/checkpoint.pth", device=device)
+    SE_Encoder = SEStyleEmbedding(pretrained_path="xingpng/OneIG-StyleEncoder", device=device)
 
     CSD_embed_pt = "scripts/style/CSD_embed.pt"
     CSD_ref = torch.load(CSD_embed_pt, weights_only=False, map_location=device)

@@ -1,10 +1,64 @@
 import os
 import stat
+import tempfile
 import megfile
 import argparse
 import pandas as pd
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
+
+# The HF cache environment must be configured before `transformers` is imported anywhere,
+# and every score script imports this module first. A caller-provided cache (HF_HOME /
+# HF_HUB_CACHE) is shared infrastructure and is left untouched; otherwise each rank gets
+# a private cache under the system temp dir to avoid shared-FS download/mmap races.
+HF_CACHE_PRESET = bool(os.environ.get("HF_HOME") or os.environ.get("HF_HUB_CACHE"))
+if not HF_CACHE_PRESET:
+    _base_cache = os.path.join(
+        tempfile.gettempdir(), f"oneig_cache_rank{os.environ.get('RANK', '0')}")
+    os.makedirs(_base_cache, exist_ok=True)
+    os.environ.setdefault("HF_HOME", os.path.join(_base_cache, "hf_home"))
+    os.environ.setdefault("HF_HUB_CACHE", os.path.join(_base_cache, "hf_hub_cache"))
+    os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(_base_cache, "transformers_cache"))
+    os.environ.setdefault("XDG_CACHE_HOME", os.path.join(_base_cache, "xdg_cache"))
+
+
+def setup_distributed():
+    """Initialize distributed state and report this process's device.
+
+    Standalone under a launcher (RANK/WORLD_SIZE in the environment): the process is
+    bound to its LOCAL_RANK GPU *before* NCCL initialization (torchrun does not call
+    set_device; without the bind every process lands on cuda:0), and
+    init_process_group failures raise instead of silently degrading into world-size 1,
+    where every process would evaluate the full dataset and race on the outputs.
+    Binding is skipped when each rank only sees a single GPU (LOCAL_RANK >=
+    device_count), where logical device 0 is already correct.
+
+    Embedded callers (evaluation inside a training process) arrive with dist already
+    initialized and the device already selected by the trainer; nothing is touched.
+
+    Without launcher env vars this is a plain single-process run and no init is
+    attempted.
+    """
+    import torch
+    import torch.distributed as dist
+
+    pre_initialized = dist.is_available() and dist.is_initialized()
+    if not pre_initialized and "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        if torch.cuda.is_available():
+            launch_local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            if launch_local_rank < torch.cuda.device_count():
+                torch.cuda.set_device(launch_local_rank)
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        dist.init_process_group(backend=backend, init_method="env://")
+
+    ddp_active = dist.is_available() and dist.is_initialized()
+    world_size = dist.get_world_size() if ddp_active else 1
+    rank = dist.get_rank() if ddp_active else 0
+    local_rank = dist.get_node_local_rank() if ddp_active else 0
+
+    device = f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu"
+    return ddp_active, world_size, rank, local_rank, device
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run alignment score evaluation.")
@@ -16,7 +70,7 @@ def parse_args():
     return parser.parse_args()
 
 def is_black_image(image):
-    pixels = image.load()  
+    pixels = image.load()
     for i in range(image.width):
         for j in range(image.height):
             if pixels[i, j] != (0, 0, 0):
@@ -37,10 +91,10 @@ def split_2x2_grid(image_path, grid_size, cache_dir):
         for i in range(grid_size[1]):
             for j in range(grid_size[0]):
                 box = (
-                    j * individual_width,      
-                    i * individual_height,     
-                    (j + 1) * individual_width,  
-                    (i + 1) * individual_height  
+                    j * individual_width,
+                    i * individual_height,
+                    (j + 1) * individual_width,
+                    (i + 1) * individual_height
                 )
 
                 individual_image = grid_image.crop(box)

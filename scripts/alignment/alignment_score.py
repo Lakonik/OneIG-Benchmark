@@ -5,7 +5,7 @@ import megfile
 import shutil
 import pandas as pd
 from tqdm import tqdm
-from scripts.utils.utils import parse_args, split_2x2_grid, save2csv, on_rm_error
+from scripts.utils.utils import parse_args, split_2x2_grid, save2csv, on_rm_error, setup_distributed
 
 import json
 from copy import deepcopy
@@ -63,31 +63,7 @@ def alignment_score(img_path, questions, dependencies, img_grid, cache_dir, infe
 def main():
     args = parse_args()
     
-    # Initialize distributed (multi-node/multi-GPU) environment if available
-    def _dist_init_if_needed():
-        if dist.is_available():
-            if not dist.is_initialized():
-                backend = "nccl" if torch.cuda.is_available() else "gloo"
-                try:
-                    dist.init_process_group(backend=backend, init_method="env://")
-                except Exception:
-                    pass
-
-    _dist_init_if_needed()
-
-    ddp_active = dist.is_available() and dist.is_initialized()
-    world_size = dist.get_world_size() if ddp_active else 1
-    rank = dist.get_rank() if ddp_active else 0
-    local_rank = dist.get_node_local_rank() if ddp_active else 0
-    
-    if torch.cuda.is_available():
-        try:
-            device_index = torch.cuda.current_device()
-        except Exception:
-            device_index = local_rank
-        device = f"cuda:{device_index}"
-    else:
-        device = "cpu"
+    ddp_active, world_size, rank, local_rank, device = setup_distributed()
     
     cache_dir = os.path.join(tempfile.gettempdir(), f"oneigbench_tmp_{formatted_time}_rank{rank}")
     os.makedirs(cache_dir, exist_ok=True)
@@ -99,37 +75,11 @@ def main():
     if rank == 0:
         os.makedirs(os.path.dirname(alignment_score_csv), exist_ok=True)
 
-    # Configure per-rank cache roots to avoid shared-FS mmap/download conflicts
-    base_cache = os.path.join(tempfile.gettempdir(), f"oneig_cache_rank{rank}")
-    os.makedirs(base_cache, exist_ok=True)
-    os.environ.setdefault("HF_HOME", os.path.join(base_cache, "hf_home"))
-    os.environ.setdefault("HF_HUB_CACHE", os.path.join(base_cache, "hf_hub_cache"))
-    os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(base_cache, "transformers_cache"))
-    os.environ.setdefault("XDG_CACHE_HOME", os.path.join(base_cache, "xdg_cache"))
 
     # save the alignment score of each method (only used on rank 0 after aggregation)
     score_csv = pd.DataFrame(index=args.model_names, columns=["alignment"]) if rank == 0 else None
     
-    # Instantiate inferencer with rank-0 first to avoid concurrent downloads
-    # Decide warm-up leader: if cache lives inside repo (shared), use global rank 0; else per-node GPU0
-    def _is_within_repo(path):
-        try:
-            repo_root = os.path.abspath(os.getcwd())
-            ap = os.path.abspath(path)
-            return ap.startswith(repo_root + os.sep)
-        except Exception:
-            return False
-
-    shared_download = _is_within_repo(base_cache)
-    if ddp_active:
-        is_leader = (rank == 0) if shared_download else (local_rank == 0)
-        if is_leader:
-            inferencer = Qwen2_5VLBatchInferencer("Qwen/Qwen2.5-VL-7B-Instruct", device=device)
-        dist.barrier()
-        if not is_leader:
-            inferencer = Qwen2_5VLBatchInferencer("Qwen/Qwen2.5-VL-7B-Instruct", device=device)
-    else:
-        inferencer = Qwen2_5VLBatchInferencer("Qwen/Qwen2.5-VL-7B-Instruct", device=device)
+    inferencer = Qwen2_5VLBatchInferencer("Qwen/Qwen2.5-VL-7B-Instruct", device=device)
     
     # Local collection of results as tuples: (row_key, model_name, result)
     local_results = []
