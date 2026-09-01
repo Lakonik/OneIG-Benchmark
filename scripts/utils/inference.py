@@ -9,7 +9,6 @@ from transformers import (AutoModel, AutoProcessor, AutoTokenizer, AutoConfig,
                             CLIPImageProcessor, CLIPVisionModelWithProjection)
 from qwen_vl_utils import process_vision_info
 
-torch.manual_seed(42)
 
 class Qwen2_5VLBatchInferencer:
     def __init__(self, model_path: str = "Qwen/Qwen2.5-VL-7B-Instruct", 
