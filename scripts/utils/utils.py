@@ -1,25 +1,10 @@
 import os
 import stat
-import tempfile
 import megfile
 import argparse
 import pandas as pd
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
-
-# The HF cache environment must be configured before `transformers` is imported anywhere,
-# and every score script imports this module first. A caller-provided cache (HF_HOME /
-# HF_HUB_CACHE) is shared infrastructure and is left untouched; otherwise each rank gets
-# a private cache under the system temp dir to avoid shared-FS download/mmap races.
-HF_CACHE_PRESET = bool(os.environ.get("HF_HOME") or os.environ.get("HF_HUB_CACHE"))
-if not HF_CACHE_PRESET:
-    _base_cache = os.path.join(
-        tempfile.gettempdir(), f"oneig_cache_rank{os.environ.get('RANK', '0')}")
-    os.makedirs(_base_cache, exist_ok=True)
-    os.environ.setdefault("HF_HOME", os.path.join(_base_cache, "hf_home"))
-    os.environ.setdefault("HF_HUB_CACHE", os.path.join(_base_cache, "hf_hub_cache"))
-    os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(_base_cache, "transformers_cache"))
-    os.environ.setdefault("XDG_CACHE_HOME", os.path.join(_base_cache, "xdg_cache"))
 
 
 def setup_distributed():
