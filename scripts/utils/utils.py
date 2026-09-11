@@ -7,6 +7,31 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 
+class peft_adapter_on_device:
+    """Make `PeftModel.from_pretrained` load adapter weights onto `device` (an indexed device string
+    such as "cuda:3") while the block runs.
+
+    PEFT otherwise loads them through safetensors with device="cuda", which safetensors resolves to
+    cuda:0 regardless of the current device. In a multi-GPU process the following cuda:0 -> own-GPU copy
+    initializes peer access and leaves a CUDA context on every GPU, so each non-zero rank shows up in
+    nvidia-smi on all devices.
+    """
+
+    def __init__(self, device):
+        self.device = device
+
+    def __enter__(self):
+        from peft import PeftModel
+        self._descriptor = PeftModel.__dict__['from_pretrained']
+        orig, device = PeftModel.from_pretrained, self.device  # bound, so `cls` is already supplied
+        PeftModel.from_pretrained = staticmethod(
+            lambda *args, **kwargs: orig(*args, **{'torch_device': device, **kwargs}))
+
+    def __exit__(self, exc_type, exc, tb):
+        from peft import PeftModel
+        PeftModel.from_pretrained = self._descriptor
+
+
 def setup_distributed():
     """Initialize distributed state and report this process's device.
 

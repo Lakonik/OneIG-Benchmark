@@ -5,7 +5,7 @@ import megfile
 import shutil
 import pandas as pd
 from tqdm import tqdm
-from scripts.utils.utils import parse_args, split_2x2_grid, save2csv, on_rm_error, setup_distributed
+from scripts.utils.utils import parse_args, split_2x2_grid, save2csv, on_rm_error, setup_distributed, peft_adapter_on_device
 
 import torchvision
 torchvision.disable_beta_transforms_warning()
@@ -68,7 +68,8 @@ def main():
                         continue
                     full = os.path.join(shared_models_dir, name)
                     shutil.rmtree(full, ignore_errors=True) if os.path.isdir(full) else os.remove(full)
-            model, preprocess = dreamsim(pretrained=True, device=device)
+            with peft_adapter_on_device(device):  # the LoRA adapter must not detour through cuda:0
+                model, preprocess = dreamsim(pretrained=True, device=device)
             if not os.path.exists(ready_marker):
                 open(ready_marker, "w").close()
     finally:
