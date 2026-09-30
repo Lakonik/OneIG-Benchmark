@@ -20,7 +20,7 @@
 """LLaMA model configuration"""
 
 from ...configuration_utils import PretrainedConfig
-from ...modeling_rope_utils import rope_config_validation
+from scripts.reasoning.vendored_llama_v4461.modeling_rope_utils import rope_config_validation
 
 
 class LlamaConfig(PretrainedConfig):

@@ -148,10 +148,10 @@ class LLM2CLIP:
         # Initialize processor and models
         self.processor = CLIPImageProcessor.from_pretrained(processor_model)
 
-        self.model = AutoModel.from_pretrained(
-            model_name, 
+        from scripts.utils.llm2clip.modeling_clip import LLM2CLIPModel
+        self.model = LLM2CLIPModel.from_pretrained(
+            model_name,
             torch_dtype=torch.bfloat16,
-            trust_remote_code=True
         ).to(device).eval()
 
         self.llm_model_name = llm_model_name

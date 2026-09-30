@@ -37,7 +37,7 @@ from ...modeling_outputs import (
     SequenceClassifierOutputWithPast,
     TokenClassifierOutput,
 )
-from ...modeling_rope_utils import ROPE_INIT_FUNCTIONS
+from scripts.reasoning.vendored_llama_v4461.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from ...modeling_utils import PreTrainedModel
 from ...pytorch_utils import ALL_LAYERNORM_LAYERS
 from ...utils import (
@@ -737,6 +737,12 @@ class LlamaPreTrainedModel(PreTrainedModel):
     _supports_static_cache = True
 
     def _init_weights(self, module):
+        if isinstance(module, LlamaRotaryEmbedding):
+            inv_freq, module.attention_scaling = module.rope_init_fn(
+                module.config, module.inv_freq.device, **module.rope_kwargs
+            )
+            module.inv_freq.copy_(inv_freq)
+            module.original_inv_freq = module.inv_freq
         std = self.config.initializer_range
         if isinstance(module, nn.Linear):
             module.weight.data.normal_(mean=0.0, std=std)
